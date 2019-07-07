@@ -3,7 +3,7 @@ const _ = require('lodash');
 
 const AWS_ACCESS_KEY = '';
 const AWS_SECRET_KEY = '';
-const AWS_REGION = 'us-west-2';
+const AWS_REGION = '';
 
 const connParams = {
     accessKeyId: AWS_ACCESS_KEY,
