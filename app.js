@@ -11,11 +11,19 @@ const connParams = {
     region: AWS_REGION
 }
 
+
+/**
+ * AWS Translate Service Invocation.
+ *
+ **/
 const doTranslation = (textToTranslate) => {
+    console.log("Text to translate", textToTranslate);
+
+    if (!textToTranslate) return;
 
     const AWSTranslate = new AWS.Translate(connParams);
 
-    AWSTranslate
+    return AWSTranslate
         .translateText({
             SourceLanguageCode: 'en',
             TargetLanguageCode: 'es',
@@ -24,29 +32,75 @@ const doTranslation = (textToTranslate) => {
         .promise()
         .then((results) => {
             const translatedText = _.get(results, 'TranslatedText', 'Could not Translate');
-            console.log(translatedText)
+            console.log("translated text", translatedText)
+            return translatedText;
+
         })
         .catch((error) => console.error(error))
 }
 
 
-// Pull data from S3 speech_to_text bucket and translate.
-const S3 = new AWS.S3(connParams);
+exports.handler = async (event) => {
 
-S3
-    .getObject({
-        Bucket: 'armando-aws-translator-speech-to-text-results',
-        Key: 'hello_to_text2.json'
-    })
-    .promise()
-    .then((results) => {
-        const data = _.get(results, 'Body');
-        const dataAsString = new Buffer(data).toString();
-        const dataAsJSON = JSON.parse(dataAsString);
+    if (!event) return {
+        statusCode: 400,
+        body: JSON.stringify('Error. No payload.')
+    }
 
-        return _.get(dataAsJSON, 'results.transcripts[0].transcript');
-    })
-    .then((textToTranslate) => doTranslation(textToTranslate))
-    .catch((error) => console.error(error));
+    const record = _.get(event, 'Records[0]');
+    if (!record)  return {
+        statusCode: 400,
+        body: JSON.stringify('Error. Not Record provided.')
+    }
+
+    const { bucket, object } = _.get(record, 's3');
+    const inputBucketName = bucket.name;
+    const fileName = object.key;
+
+    console.log("bucketName", inputBucketName);
+    console.log("fileName", fileName);
+
+    // Pull data from S3 speech_to_text bucket and translate.
+    const S3 = new AWS.S3(connParams);
+
+    return S3.getObject({
+            Bucket: inputBucketName,
+            Key: fileName
+        })
+        .promise()
+        .then((results) => {
+            const data = _.get(results, 'Body');
+            const dataAsString = new Buffer(data).toString();
+            const dataAsJSON = JSON.parse(dataAsString);
+
+            return _.get(dataAsJSON, 'results.transcripts[0].transcript');
+        })
+        .then((textToTranslate) => doTranslation(textToTranslate))
+        .then((translatedText) => {
+            console.log("Translated data to save", translatedText);
+
+            // Save the output to S3 Bucket
+            const destinationBucket = 'armando-aws-translator-translation-results'
+
+            return S3.putObject({
+                Body: JSON.stringify({ text: translatedText }),
+                Bucket: destinationBucket,
+                Key: fileName,
+            }).promise()
+        })
+        .then(() => ({
+               statusCode: 200,
+               body: JSON.stringify(`Translate Job - ${fileName} DONE`)
+             })
+        )
+        .catch((error) => {
+            console.error(error);
+
+            return {
+              statusCode: 400,
+              body: JSON.stringify(`Error - ${error.message}`)
+            }
+        })
+};
 
 
